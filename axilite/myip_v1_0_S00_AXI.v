@@ -87,11 +87,14 @@
 	reg  	axi_wready;
 	reg [1 : 0] 	axi_bresp;
 	reg  	axi_bvalid;
-	reg [C_S_AXI_ADDR_WIDTH-1 : 0] 	axi_araddr;
 	reg  	axi_arready;
 	reg [C_S_AXI_DATA_WIDTH-1 : 0] 	axi_rdata;
 	reg [1 : 0] 	axi_rresp;
 	reg  	axi_rvalid;
+
+	reg [C_S_AXI_ADDR_WIDTH-1 : 0] 	axi_ar2raddr;
+    wire                            axi_ar2rready;
+    reg                             axi_ar2rvalid;
 
 	// Example-specific design signals
 	// local parameter for addressing 32 bit / 64 bit C_S_AXI_DATA_WIDTH
@@ -308,28 +311,30 @@
 	// The read address is also latched when S_AXI_ARVALID is 
 	// asserted. axi_araddr is reset to zero on reset assertion.
 
+    assign axi_arready = ~axi_ar2rvalid;
 	always @( posedge S_AXI_ACLK )
 	begin
 	  if ( S_AXI_ARESETN == 1'b0 )
 	    begin
-	      axi_arready <= 1'b0;
-	      axi_araddr  <= {C_S_AXI_ADDR_WIDTH{1'b0}};
+	      axi_ar2rvalid <= 1'b0;
+		  axi_ar2raddr  <= {C_S_AXI_ADDR_WIDTH{1'b0}};
 	    end 
 	  else
 	    begin    
-	      if (~axi_arready && S_AXI_ARVALID)
+	      if (axi_arready && S_AXI_ARVALID)
 	        begin
 	          // indicates that the slave has acceped the valid read address
-	          axi_arready <= 1'b1;
+	          axi_ar2rvalid <= 1'b1;
 	          // Read address latching
-	          axi_araddr  <= S_AXI_ARADDR;
+	          axi_ar2raddr  <= S_AXI_ARADDR;
 	        end
-	      else
+	      else if (axi_ar2rready)
 	        begin
-	          axi_arready <= 1'b0;
+	           axi_ar2rvalid <= 1'b0;
 	        end
 	    end 
 	end       
+    assign axi_ar2rready = S_AXI_RREADY || ~S_AXI_RVALID;
 
 	// Implement axi_arvalid generation
 	// axi_rvalid is asserted for one S_AXI_ACLK clock cycle when both 
@@ -348,13 +353,13 @@
 	    end 
 	  else
 	    begin    
-	      if (axi_arready && S_AXI_ARVALID && ~axi_rvalid)
+	      if (axi_ar2rvalid && axi_ar2rready)
 	        begin
 	          // Valid read data is available at the read data bus
 	          axi_rvalid <= 1'b1;
 	          axi_rresp  <= 2'b0; // 'OKAY' response
 	        end   
-	      else if (axi_rvalid && S_AXI_RREADY)
+	      else if (S_AXI_RREADY)
 	        begin
 	          // Read data is accepted by the master
 	          axi_rvalid <= 1'b0;
@@ -365,11 +370,12 @@
 	// Implement memory mapped register select and read logic generation
 	// Slave register read enable is asserted when valid address is available
 	// and the slave is ready to accept the read address.
-	assign slv_reg_rden = axi_arready & S_AXI_ARVALID & ~axi_rvalid;
+    assign slv_reg_rden = axi_ar2rvalid && axi_ar2rready;
+   
 	always @(*)
 	begin
 	      // Address decoding for reading registers
-	      case ( axi_araddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB] )
+	      case ( axi_ar2raddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB] )
 	        2'h0   : reg_data_out = slv_reg0;
 	        2'h1   : reg_data_out = slv_reg1;
 	        2'h2   : reg_data_out = slv_reg2;
